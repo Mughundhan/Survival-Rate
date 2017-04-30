@@ -1,0 +1,526 @@
+---
+title: "Titanic - Survival Rate"
+author: "Mughundhan Chandrasekar"
+date: "4/15/2017"
+output:
+  html_document: default
+  word_document: default
+---
+
+###**INTRODUCTION**
+The sinking of the RMS Titanic is one of the most infamous shipwrecks in history.  On April 15, 1912, during her maiden voyage, the Titanic sank after colliding with an iceberg, killing 1502 out of 2224 passengers and crew. This sensational tragedy shocked the international community and led to better safety regulations for ships.
+
+One of the reasons that the shipwreck led to such loss of life was that there were not enough lifeboats for the passengers and crew. Although there was some element of luck involved in surviving the sinking, some groups of people were more likely to survive than others, such as women, children, and the upper-class.
+
+This mini-project involves the analysis of what sorts of people were likely to survive.
+
+###**1.Creating an Environment**
+This stage involves the following:
+- Setting up a working directory to access Titanic dataset (data classified: 1. Train and 2. Test)
+- Loading the train dataset and other required libraries to this envrionment
+
+
+```{r warning=FALSE, message=FALSE}
+rm(list=ls())
+library(NLP)
+library(tm)
+library(R.utils)
+library(stringi)
+library(data.table)
+library(ggplot2)
+library(SnowballC)
+library(caret)        # Confusion Matrix
+library(pscl)         # For R^2
+library(ROCR)         # for ROC and AUC
+setwd("/Users/Mughundhan/KAGGLE/Titanic")
+train <- read.csv("train.csv")
+#Columns available in the original Data-set
+colnames(train)
+```
+
+
+###**2.Cleaning the data**
+- Remove unnecessary columns (that are not useful in the modeling): Columns such as Ticket, Cabin and Embarked are of no great use. So, these columns shall be removed
+- Handle missing values
+
+```{r warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+colnames(train)
+drops <- c("Ticket", "Cabin","Embarked")
+train <- train[ ,!(names(train) %in% drops)]
+colnames(train)
+class(train$Name)
+train$Name <- as.character(train$Name)
+train$Sex <- as.character(train$Sex)
+class(train$Name)
+#Data-set after removing the columns
+head(train)
+```
+
+- Columns available after removing the unnecessary columns.
+```{r warning=FALSE, message=FALSE}
+colnames(train)
+```
+
+**2.1.Name Cannonicalization** into title-groups: 
+
+- Process for converting data that has more than one possible representation into a "standard", "normal", or canonical form. (5 bins used here) 
+
+- Names are replaced with Prefix (for instance: Mr. John is replaced with Mr. and Dan Mrs. Jahn is replaced with Mrs.)
+
+The names of the passengers are given as follows:
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+head(train$Name)
+master_vector <- grep("Master.", train$Name)  
+miss_vector <- grep("Miss.|Ms.", train$Name)
+mrs_vector <- grep("Mrs\\.", train$Name)
+mr_vector <- grep("Mr\\.", train$Name)
+dr_vector <- grep("Dr.", train$Name)
+rev_vector <- grep("Rev.", train$Name)
+maj_vector <- grep("Major.", train$Name)
+col_vector <- grep("Col.", train$Name)
+for(i in master_vector)
+{ train$Name[i] <- "Master"
+}
+for(i in miss_vector)
+{ train$Name[i] <- "Miss"
+}
+for(i in mr_vector)
+{ train$Name[i] <- "Mr"
+}
+for(i in mrs_vector)
+{ train$Name[i] <- "Mrs"
+}
+for(i in dr_vector)
+{ train$Name[i] <- "Dr"
+}
+for(i in rev_vector)
+{ train$Name[i] <- "Rev"
+}
+```
+
+After performing Cannonicalization, the above names are replaced as follows:
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+head(train$Name)
+```
+
+####**2.2.Handling Missing Values**
+
+#####**2.2.1.Compute Average** for each title-group -
+
+- Age column shall not be removed: Substitute the mean age values of each section of people (instead of taking an universal average - makes our prediction more efficient) in place of the missing values.
+
+- For instance, if a person's age field is missing, and the person's name is "Mr.", then the mean of the age of all passengers whose name is "Mr." is replaced in place of missing field. Likewise, it is done for Mrs, Miss, Master, Dr and Rev.
+
+**Operations performed on the dataset with missing values.**
+
+```{r message=FALSE, warning=FALSE}
+#Number of NA values after cleaning the data
+sum(is.na(train$Age))
+#Maximum Age
+max(train$Age)
+#Minimum Age
+min(train$Age)
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE, results='hide'}
+master_age <- round(mean(train$Age[train$Name == "Master"], na.rm=TRUE), digits=2)
+miss_age <- round(mean(train$Age[train$Name == "Miss"], na.rm=TRUE), digits=2)
+mrs_age <- round(mean(train$Age[train$Name == "Mrs"], na.rm=TRUE), digits=2)
+mr_age <- round(mean(train$Age[train$Name == "Mr"], na.rm=TRUE), digits=2)
+dr_age <- round(mean(train$Age[train$Name == "Dr"], na.rm=TRUE), digits=2)
+rev_age <- round(mean(train$Age[train$Name == "Rev"], na.rm=TRUE), digits=2)
+for(i in 1:nrow(train))
+{
+  if(is.na(train[i,6]))
+  {
+    if(train$Name[i] == 'Master')
+    {
+      train$Age[i] <- master_age
+    }
+    if(train$Name[i] == 'Miss')
+    {
+      train$Age[i] <- miss_age
+    }
+    if(train$Name[i] == 'Mrs')
+    {
+      train$Age[i] <- mrs_age
+    }
+    if(train$Name[i] == 'Mr')
+    {
+      train$Age[i] <- mr_age
+    }
+    if(train$Name[i] == 'Dr')
+    {
+      train$Age[i] <- dr_age
+    }
+    if(train$Name[i] == 'Rev')
+    {
+      train$Age[i] <- rev_age
+    }
+  }
+}
+```
+
+**Operations performed on the dataset, after handling the missing values.**
+
+```{r message=FALSE, warning=FALSE}
+#Number of NA values after cleaning the data
+sum(is.na(train$Age))
+#Maximum Age
+max(train$Age)
+#Minimum Age
+min(train$Age)
+```
+
+#####**2.2.2.Alternative Way** - Not evaluated
+```{r warning=FALSE, eval=FALSE, message=FALSE, echo=FALSE}
+
+train$BinGen <- 'NA'
+train$BinGen <- as.character(train$BinGen)
+train$BinGen[train$Sex == "female"] <- 0
+train$BinGen[train$Sex == "male"] <- 1
+train$Name[grep("Mr", train$Name) & train$BinGen==1] <- "Mr"
+train$Name[grep("Master", train$Name)] <- "Master"
+train$Name[grep("Mrs", train$Name) & train$BinGen==0] <- "Mrs"
+train$Name[grep("Miss", train$Name)] <- "Miss"
+train$Name[grep("Dr", train$Name)] <- "Dr"
+#Average age of each sub-section shall be computed :
+comp1 <- aggregate( train$Age ~ train$Name, train, mean )
+```
+
+**2.3.Creating New Varaibles and Discretization**
+
+- New Variable: **Family**: 1+ SibSp + Parch
+- New Variable: **Fare2**: Discrete Fare Column (four bins)
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+train$FamilySize <- 1 + train$SibSp + train$Parch
+train$Fare2 <- 'NA'
+train$Fare2[train$Fare < 10] <- '<$10'
+train$Fare2[train$Fare > 10 & train$Fare < 20] <- '$10-$20'
+train$Fare2[train$Fare > 20 & train$Fare < 30] <- '$20-$30'
+train$Fare2[train$Fare >= 30] <- '$30+'
+train$Child <- 'NA'
+train$Child <- as.numeric(train$Child)
+train$Child[train$Age < 18] <- 1
+train$Child[train$Age >= 18] <- 0
+# After adding new columns
+head(train)
+```
+
+###**3.Data Exploration**
+
+###**3.1.Female Vs Male : Survived and Deceased Comparison**
+
+- Survival Percent for female, male is given as follows
+
+```{r warning=FALSE, message=FALSE}
+counts <- table(train$Survived, train$Sex)
+#confusion Matrix
+counts
+female <- nrow(train[train$Sex=='female',])
+male <- nrow(train[train$Sex=='male',])
+slice <- c(female, male)
+divi <- c("Female", "Male")
+
+survival_percent <- c(counts[2]/(counts[1]+counts[2]), counts[4]/(counts[3]+counts[4]))
+# Survival Percent for Female,   Male
+survival_percent
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+pie(slice, labels = divi, main="Pie Chart of Passengers based on Gender", col = c("Pink","LightBlue"))
+barplot(counts, 
+        xlab = "Gender", 
+        ylab = "Number of People", 
+        main = "Female Vs Male : Survived and Deceased Comparison",
+        col = c("darkgreen", "darkorange"))
+legend("topleft",
+        legend = c("Survived", "Deceased"),
+       fill = c("darkorange","darkgreen"))
+```
+
+####**Inference**  
+- Among the passengers in Titanic - 65% are Males and 35% are Females.
+- But the analysis indicates that Females (74%) have a better survival rate than Males (18%).
+
+###**3.2.Survived and Deceased Comparison based on the Ticket Fare**
+
+- Survival percent for ticket fare ($10-$20,   $20-$30,   $30.00+,   <$10.00) are given below:
+
+```{r warning=FALSE, message=FALSE}
+fcounts <- table(train$Survived, train$Fare2)
+#confusion Matrix
+fcounts
+
+fare_survival_percent <- c(fcounts[2]/(fcounts[1]+fcounts[2]), fcounts[4]/(fcounts[3]+fcounts[4]), fcounts[6]/(fcounts[5]+fcounts[6]), fcounts[8]/(fcounts[7]+fcounts[8]))
+fare_survival_percent
+# $10-$20,   $20-$30,   $30.00+,   <$10.00
+
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+fdivi <- c("$10-$20","$20-$30","$30.00+","<$10.00")
+fsurv <- c(fcounts[1]+fcounts[2], fcounts[3]+fcounts[4], fcounts[5]+fcounts[6], fcounts[7]+fcounts[8])
+pie(fsurv, labels = fdivi, main = "Pie Chart of Passengers based on Ticket fare", col = rainbow(4))
+barplot(fcounts, 
+        xlab = "Price of the Ticket", 
+        ylab = "Number of People", 
+        main = "Survived and Deceased Comparison based on the Ticket Fare",
+        col = c("darkgreen", "darkorange"))
+legend("topleft",
+        legend = c("Survived", "Deceased"),
+       fill = c("darkorange","darkgreen"))
+```
+
+####**Inference** 
+- Majority of the passengers have purchased the ticket for a fare less than $10. 
+- Majority of the survivors have purchased the ticket for a fare greater than $30. 
+- It is evident that passengers with an expensive ticket are more likely to survive when compared with the passengers with lower ticket fare.
+
+###**3.3.Survived and Deceased Comparison based on the Class**
+
+- Survival Percent for different classes (Class1, Class2, Class3) are as follows
+
+```{r warning=FALSE, message=FALSE}
+Ccounts <- table(train$Survived, train$Pclass)
+#confusion Matrix
+Ccounts
+
+Class_survival_percent <- c(Ccounts[2]/(Ccounts[1]+Ccounts[2]), Ccounts[4]/(Ccounts[3]+Ccounts[4]), Ccounts[6]/(Ccounts[5]+Ccounts[6]))
+Class_survival_percent
+# Class(1), Class(2), Class(3)
+```
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+Csurv <- c(Ccounts[1]+Ccounts[2], Ccounts[3]+Ccounts[4], Ccounts[5]+Ccounts[6])
+Clab <- c("1st Class", "2nd Class", "3rd Class")
+pie(Csurv, labels = Clab, main = "Pie Chart of Passengers based on the Class", col = cm.colors(3))
+
+barplot(Ccounts, 
+        xlab = "CLASS", 
+        ylab = "Number of People", 
+        main = "Survived and Deceased Comparison based on the Class",
+        col = c("darkgreen", "darkorange"))
+legend("topleft",
+        legend = c("Survived", "Deceased"),
+       fill = c("darkorange","darkgreen"))
+```
+
+####**Inference**
+- Majority of the passengers travelled in 3rd Class.
+- The analysis indicates that the passengers travelling in higher classes are more likely to survive.
+
+###**3.4.Children Vs Others : Survived and Deceased Comparison**
+
+- Survival Rate for children and adults are given below :
+
+```{r warning=FALSE, message=FALSE}
+CHcounts <- table(train$Survived, train$Child)
+#confusion Matrix
+CHcounts
+
+CH_survival_percent <- c(CHcounts[2]/(CHcounts[1]+CHcounts[2]), CHcounts[4]/(CHcounts[3]+CHcounts[4]))
+CH_survival_percent
+# Others,   Children
+```
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+CHsurv <- c(CHcounts[1]+CHcounts[2], CHcounts[3]+CHcounts[4])
+CHlab <- c("Adults", "Children")
+pie(CHsurv, labels = CHlab, main = "Pie Chart of distribution of Children and Adult", col = heat.colors(2))
+
+barplot(CHcounts, 
+        xlab = "Children or Not", 
+        ylab = "Number of People", 
+        main = "Children Vs Others : Survived and Deceased Comparison",
+        col = c("darkgreen", "darkorange"))
+legend("topright",
+        legend = c("Survived", "Deceased"),
+       fill = c("darkorange","darkgreen"))
+```
+
+####**Inference**
+- Children consitute the microscopic minority category among the passengers on Titanic.
+- From the analysis, it is very clear that children were given higher priority (age < 18 years). Thus, the survival rate for children is higher when compared with people having age >= 18 years.
+
+###**4.Classification and Analysis**
+- **Proportional Table:** Gives an idea about the number of people survived based on Gender (Actual Vs Predicted)
+- **Aggregate Function:** Simply determines the combination of attributes which makes the survival rate better (given in descending order)
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+prop.table(table(train$Sex, train$Survived))
+#prop.table(table(train$Pclass, train$Survived))
+#prop.table(table(train$Fare2, train$Survived))
+aggregate(Survived ~ Child + Sex, data=train, FUN=sum)
+aggregate(Survived ~ Child + Sex, data=train, FUN=length)
+
+```
+
+###**4.1.Survival Rate based on combination of factors**
+
+NOTE: 1.00 stands for 100% survival rate.
+
+####Survival Rate based on **Gender, Class of Travel, Price of Ticket, Age of Passenger**.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Fare2 + Child + Sex + Pclass, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3,4,5)])
+```
+
+####Survival Rate based on **Gender, Class of Travel, Price of Ticket**.
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Fare2 + Sex + Pclass, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3,4)])
+```
+
+####Survival Rate based on **Gender, Class of Travel**.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Sex + Pclass, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3)])
+```
+
+####Survival Rate based on **Class of Travel, Price of Ticket, Age of Passenger**.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Fare2 + Child + Pclass, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3,4)])
+```
+
+####Survival Rate based on **Gender, Class of Travel, Age of Passenger**.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Child + Sex + Pclass, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3,4)])
+```
+
+####Survival Rate based on **Gender, Age of Passenger**.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Child + Sex, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3)])
+```
+
+####Survival Rate based on **Class of Travel, Age of Passenger**.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Child + Pclass, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3)])
+```
+
+####Survival Rate based on **Price of Ticket, Age of Passenger**.
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+aggrFCS <- aggregate(Survived ~ Fare2 + Child, data=train, FUN= function(x) (sum(x)/length(x)))
+head(aggrFCS[order(aggrFCS$Survived, decreasing = TRUE), c(1,2,3)])
+```
+
+
+
+####**Inference**
+- Its evident that all male children belonging to class 2 and class 1 were rescued.
+- All female children who traveled with a ticket fare >$10 were rescued.
+- At-laest 90% of the females who traveled at a fare >$90 were rescued.
+- Most of the men who failed to survive belong to lower class with a fare <$10
+- At-laest 98% of the females who traveled in higher class (1 or 2) were rescued.
+- Survival Rate favors the Children, Female and also depends on the Class in which the passengers travelled.
+
+
+###**5.Classifier Performance - Logistic Regression**
+```{r warning=FALSE, message=FALSE}
+# Model fitting
+model <- glm(Survived ~.,family=binomial(link='logit'),data=train)
+
+# Analysis of deviance
+anova(model,test="Chisq")
+
+# McFadden R^2
+pR2(model)
+
+#-------------------------------------------------------------------------------------------------#
+
+# MEASURING THE PREDICTIVE ABILITY OF THE MODEL
+
+# If prob > 0.5 then 1, else 0. Threshold can be set for better results
+fitted.results <- predict(model,newdata=train,type='response') #use test
+fitted.results <- ifelse(fitted.results > 0.5,1,0)
+
+misClasificError <- mean(fitted.results != train$Survived)
+print(paste('Accuracy',1-misClasificError))
+
+# Confusion matrix
+
+confusionMatrix(data=fitted.results, reference=train$Survived) #use test
+
+
+# ROC and AUC
+p <- predict(model, newdata=train, type="response") #use test
+pr <- prediction(p, train$Survived) #use test
+# TPR = sensitivity, FPR=specificity
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+plot(prf)
+
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+```
+**Alternative Way:** Not evaluated 
+```{r warning=FALSE, message=FALSE, eval=FALSE}
+
+perf = function(pred, act) {
+  # Confusion Matrix
+  xtab = table(pred, act);
+  
+  # Retrieve TP, FP, TN, FN
+  
+  TP = xtab[1,1]
+  if(nrow(xtab)==2) {
+    TN = xtab[2,2]
+  }
+  else {
+    TN = 0
+  }
+  if(nrow(xtab)==2) {
+    FP = xtab[1,2]
+  }
+  else {
+    FP = 0
+  }
+  FN = xtab[2,1]
+
+
+# Compute Accuracy, Precision, Recall, F-Measure
+
+r = matrix(NA, nrow=1, ncol=4)
+colnames(r) = c('Accuracy', 'Precision', 'Recall', 'F-Measure')
+r[1,1] = (TP+TN)/(TP+TN+FP+FN)
+r[1,2] = TP/(TP+FP)
+r[1,3] = TP/(TP+FN)
+r[1,4] = r[1,2]*r[1,3]  
+}
+
+pred = rep(0, nrow(train)) #use test
+#perf(pred, train$Survived) #use test
+#-------------------------------------------------------------------------------------------------#
+
+# Generalized Linear Model
+
+train.glm <- glm(Survived ~ Pclass + Sex + Age + Sex*Pclass, family = binomial, data=train)
+summary(train.glm)
+prob.logistic <- predict.glm(train.glm, newdata = train, type="response") #use test
+
+pred.llr <- vector()
+for(i in 1:length(prob.logistic))
+{ if(is.na(prob.logistic[i]) || prob.logistic[i] > 0.5)
+   { pred.llr[i] <- 1 #Probability > 0.5 then survived
+  
+}
+  else{
+    pred.llr <- 0
+  }
+}  
+  
+perf(pred.llr, train$Survived) #use test
+```
